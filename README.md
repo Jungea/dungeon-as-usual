@@ -11,7 +11,7 @@
 - 엔진: Godot 4.7.2
 - 언어: GDScript
 - 플랫폼: PC
-- 현재 버전: Sprint 2 프로토타입
+- 현재 버전: Sprint 3 프로토타입
 - 저장소: `https://github.com/Jungea/dungeon-as-usual`
 
 ## 게임 플레이
@@ -116,7 +116,7 @@
 - 그래픽, 사운드, 애니메이션은 프로토타입 수준입니다.
 - 저장 및 불러오기를 지원하지 않습니다.
 - Steam 기능은 아직 구현하지 않았습니다.
-- Sprint 2 이후 기능은 포함하지 않습니다.
+- Sprint 3에서는 방 이름, 방 번호, 진행 분석, 종료 통계, 미니맵을 추가했습니다. 확장 기능은 [SPRINT_4_REQUIREMENTS.md](SPRINT_4_REQUIREMENTS.md)로 미룹니다.
 
-자세한 요구사항과 작업 기록은 [GAME_REQUIREMENTS.md](GAME_REQUIREMENTS.md), [SPRINT_2_REQUIREMENTS.md](SPRINT_2_REQUIREMENTS.md), [logs/SPRINT_2.md](logs/SPRINT_2.md)에서 확인할 수 있습니다.
+자세한 요구사항과 작업 기록은 [GAME_REQUIREMENTS.md](GAME_REQUIREMENTS.md), [SPRINT_2_REQUIREMENTS.md](SPRINT_2_REQUIREMENTS.md), [SPRINT_3_REQUIREMENTS.md](SPRINT_3_REQUIREMENTS.md), [SPRINT_4_REQUIREMENTS.md](SPRINT_4_REQUIREMENTS.md), [logs/SPRINT_2.md](logs/SPRINT_2.md)에서 확인할 수 있습니다.
 

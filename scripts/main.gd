@@ -1,6 +1,7 @@
 extends Node2D
 
 const CANVAS_RECT := Rect2(180, 116, 1070, 565)
+const MINIMAP_RECT := Rect2(1010, 18, 240, 82)
 const RESIZE_HANDLE := 14.0
 const GRID_SIZE := 32.0
 
@@ -22,6 +23,13 @@ var killed := 0
 var energy_earned := 0
 var rooms_visited := 0
 var trap_hits := 0
+var hero_stack_total := 0
+var event_log: Array[Dictionary] = []
+var element_stats: Dictionary = {}
+var death_causes: Dictionary = {}
+var last_damage_source := ""
+var last_damage_amount := 0
+var last_damage_effect := ""
 var event_text := "DEPTH 메뉴에서 작업을 선택하세요."
 var result_text := ""
 var buttons: Array[Dictionary] = []
@@ -44,6 +52,8 @@ var depth1_menu: Panel
 var depth2_menu: Panel
 var menu_rows: Array[Dictionary] = []
 var depth2_rows: Array[Dictionary] = []
+var room_name_panel: Panel
+var room_name_input: LineEdit
 
 func _ready() -> void:
 	dungeon.reset()
@@ -66,10 +76,11 @@ func _build_ui() -> void:
 	_build_depth_menus()
 	_create_button("던전 오픈", Vector2(18, 565), "OPEN")
 	_create_button("던전 수정", Vector2(18, 603), "RETURN")
-	_create_button("x1", Vector2(18, 650), "SPEED_1")
-	_create_button("x2", Vector2(72, 650), "SPEED_2")
-	_create_button("x4", Vector2(126, 650), "SPEED_4")
+	_create_button("x1", Vector2(18, 525), "SPEED_1")
+	_create_button("x2", Vector2(72, 525), "SPEED_2")
+	_create_button("x4", Vector2(126, 525), "SPEED_4")
 	_build_item_panel()
+	_build_room_name_panel()
 	_refresh_depth_menus()
 
 func _build_depth_menus() -> void:
@@ -141,6 +152,7 @@ func _menu_action(action: String) -> void:
 		corridor_first = {}
 		if action == "ROOM":
 			tool = "EMPTY"
+			depth2_selected = "ROOM_SINGLE"
 			event_text = "방 기본 단일 그리기: 맵을 클릭하세요."
 			_rebuild_depth2_menu([
 				{"label": "기본 단일 그리기", "action": "ROOM_SINGLE"},
@@ -166,6 +178,7 @@ func _menu_action(action: String) -> void:
 			], "몬스터 목록")
 		else:
 			tool = "DOOR"
+			depth2_selected = "DOOR_SINGLE"
 			_rebuild_depth2_menu([
 				{"label": "그리기", "action": "DOOR_SINGLE"},
 				{"label": "그리기 모드", "action": "DOOR_MODE"},
@@ -206,6 +219,43 @@ func _build_item_panel() -> void:
 	item_panel_list.position = Vector2(12, 12)
 	item_panel_list.size = Vector2(201, 230)
 	item_panel.add_child(item_panel_list)
+
+func _build_room_name_panel() -> void:
+	room_name_panel = Panel.new()
+	room_name_panel.position = Vector2(1005, 370)
+	room_name_panel.size = Vector2(225, 86)
+	room_name_panel.visible = false
+	add_child(room_name_panel)
+	var label := Label.new()
+	label.text = "방 이름"
+	label.position = Vector2(10, 8)
+	room_name_panel.add_child(label)
+	room_name_input = LineEdit.new()
+	room_name_input.position = Vector2(10, 32)
+	room_name_input.size = Vector2(130, 30)
+	room_name_input.placeholder_text = "선택 사항"
+	room_name_panel.add_child(room_name_input)
+	var apply := Button.new()
+	apply.text = "저장"
+	apply.position = Vector2(145, 32)
+	apply.size = Vector2(65, 30)
+	apply.pressed.connect(_apply_room_name)
+	room_name_panel.add_child(apply)
+
+func _apply_room_name() -> void:
+	if selected_room < 0 or not dungeon.rooms.has(selected_room): return
+	var room: DungeonRoom = dungeon.rooms[selected_room]
+	room.custom_name = room_name_input.text.strip_edges()
+	event_text = "방 이름을 변경했습니다."
+	queue_redraw()
+
+func _update_room_name_panel() -> void:
+	if room_name_panel == null: return
+	var visible := mode == "EDIT" and selected_room >= 0 and dungeon.rooms.has(selected_room)
+	room_name_panel.visible = visible
+	if visible:
+		var room: DungeonRoom = dungeon.rooms[selected_room]
+		if not room_name_input.has_focus(): room_name_input.text = room.custom_name
 
 func _show_item_panel(title_text: String, items: Array[Dictionary]) -> void:
 	for child in item_panel_list.get_children(): child.queue_free()
@@ -351,6 +401,12 @@ func _update_buttons() -> void:
 func _start_run() -> void:
 	mode = "RUN"
 	tool = ""
+	event_log.clear()
+	element_stats.clear()
+	death_causes.clear()
+	last_damage_source = ""
+	last_damage_amount = 0
+	last_damage_effect = ""
 	energy = 0
 	entered = 0
 	killed = 0
@@ -362,6 +418,7 @@ func _start_run() -> void:
 		room.combat_hp = -1
 	_spawn_hero()
 	event_text = "던전 영업 시작! 입구방에서 용사가 출발합니다."
+	_log_event("던전 오픈")
 	_update_buttons()
 
 func _spawn_hero() -> void:
@@ -373,12 +430,36 @@ func _spawn_hero() -> void:
 	if entrance < 0: return
 	hero = DungeonHero.new(entrance)
 	entered += 1
+	hero_stack_total += 1
+	last_damage_source = ""
+	last_damage_amount = 0
+	last_damage_effect = ""
 	hero.enter(entrance, dungeon.rooms[entrance].connections)
 	hero.state = "EXPLORING"
-	hero_timer = 0.7 / speed
+	hero_timer = 1.1 / speed
+	_log_event("용사 #%d 입장: 방 #%d %s" % [entered, entrance, dungeon.rooms[entrance].display_name()], entrance)
+
+func _log_event(message: String, room_id: int = -1) -> void:
+	event_log.push_front({"message": message, "room_id": room_id})
+	if event_log.size() > 80: event_log.pop_back()
+
+func _record_damage(source: String, room: DungeonRoom, amount: int, effect: String) -> void:
+	if amount <= 0: return
+	last_damage_source = source
+	last_damage_amount = amount
+	last_damage_effect = effect
+	if not element_stats.has(source):
+		element_stats[source] = {"damage": 0, "hits": 0, "kills": 0, "max": 0}
+	var stats: Dictionary = element_stats[source]
+	stats["damage"] += amount
+	stats["hits"] += 1
+	stats["max"] = max(int(stats["max"]), amount)
+	element_stats[source] = stats
+	_log_event("용사 #%d · 방 #%d · %s · 피해 %d · %s · HP %d/%d" % [entered, room.id, source, amount, effect, max(hero.hp, 0), GameData.HERO_HP], room.id)
 
 func _process(delta: float) -> void:
 	if mode == "RUN" and hero != null: _process_hero(delta * speed)
+	_update_room_name_panel()
 	queue_redraw()
 
 func _process_hero(delta: float) -> void:
@@ -407,28 +488,34 @@ func _process_hero(delta: float) -> void:
 	if was_backtracking: hero.state = "BACKTRACKING"
 	var destination: DungeonRoom = dungeon.rooms[next_id]
 	event_text = "용사가 %s(으)로 이동합니다." % destination.display_name()
-	hero_timer = (0.4 if was_backtracking else 0.65) / speed
+	_log_event("용사 #%d 이동: 방 #%d %s" % [entered, destination.id, destination.display_name()], destination.id)
+	hero_timer = (0.8 if was_backtracking else 1.1) / speed
 
 func _process_room(room: DungeonRoom) -> void:
 	if room.role == "Treasure":
 		hero.state = "FOUND TREASURE"
 		event_text = "보물을 획득했습니다!"
+		_log_event("용사 #%d · 방 #%d · 보물 획득" % [entered, room.id], room.id)
 		_finish_run()
 		return
+	_log_event("용사 #%d · 방 #%d 진입" % [entered, room.id], room.id)
 	match room.content:
 		"Spike":
 			hero.hp -= GameData.SPIKE_DAMAGE
 			trap_hits += 1
+			_record_damage("가시", room, GameData.SPIKE_DAMAGE, "함정 발동")
 			event_text = "가시 함정 발동! 체력 -%d" % GameData.SPIKE_DAMAGE
 			if hero.hp <= 0: _hero_died()
 		"Poison":
 			hero.hp -= GameData.POISON_DAMAGE
 			trap_hits += 1
+			_record_damage("독물", room, GameData.POISON_DAMAGE, "독 효과")
 			event_text = "독물 함정 발동! 체력 -%d" % GameData.POISON_DAMAGE
 			if hero.hp <= 0: _hero_died()
 		"Fire":
 			hero.hp -= GameData.FIRE_DAMAGE
 			trap_hits += 1
+			_record_damage("불구덩이", room, GameData.FIRE_DAMAGE, "화염 효과")
 			event_text = "불구덩이 발동! 체력 -%d" % GameData.FIRE_DAMAGE
 			if hero.hp <= 0: _hero_died()
 		"Slime", "WeakMonster", "MidMonster", "StrongMonster":
@@ -437,7 +524,8 @@ func _process_room(room: DungeonRoom) -> void:
 			else:
 				hero.state = "FIGHTING " + room.content.to_upper()
 				event_text = "%s과(와) 전투 시작!" % room.content_name()
-				combat_timer = 0.35 / speed
+				_log_event("용사 #%d · 방 #%d · %s 전투 시작" % [entered, room.id, room.content_name()], room.id)
+				combat_timer = 0.8 / speed
 
 func _combat_round() -> void:
 	if hero == null or result_text != "": return
@@ -461,25 +549,48 @@ func _combat_round() -> void:
 	room.combat_hp = remaining
 	event_text = "용사가 %s을(를) 공격했습니다. 피해 %d" % [room.content_name(), GameData.HERO_ATTACK]
 	hero.hp -= monster_attack
+	_record_damage(room.content_name(), room, monster_attack, "몬스터 공격")
 	if hero.hp <= 0:
 		event_text = "%s의 공격! 용사 사망" % room.content_name()
 		_hero_died()
 	else:
 		event_text = "%s의 공격! 용사 체력 -%d" % [room.content_name(), monster_attack]
-		combat_timer = 0.35 / speed
+		combat_timer = 0.8 / speed
 
 func _hero_died() -> void:
 	if hero == null: return
 	hero.state = "DEAD"
 	killed += 1
+	var cause := last_damage_source if last_damage_source != "" else "원인 미상"
+	death_causes[cause] = int(death_causes.get(cause, 0)) + 1
+	if element_stats.has(cause):
+		var cause_stats: Dictionary = element_stats[cause]
+		cause_stats["kills"] += 1
+		element_stats[cause] = cause_stats
 	energy += GameData.DEATH_ENERGY
 	energy_earned += GameData.DEATH_ENERGY
-	event_text = "용사 사망  •  에너지 +%d" % GameData.DEATH_ENERGY
+	event_text = "용사 사망  •  원인: %s  •  에너지 +%d" % [cause, GameData.DEATH_ENERGY]
+	var death_room_id := hero.current_room
+	_log_event("용사 #%d 사망 · 원인 %s · 마지막 피해 %d" % [entered, cause, last_damage_amount], death_room_id)
 	await get_tree().create_timer(1.0 / speed).timeout
 	if mode == "RUN" and result_text == "": _spawn_hero()
 
 func _finish_run() -> void:
-	result_text = "던전 공략 완료\n\n입장한 용사: %d명\n사망한 용사: %d명\n\n획득 에너지: %d\n방문한 방: %d회\n함정 발동: %d회" % [entered, killed, energy_earned, rooms_visited, trap_hits]
+	var top_source := "없음"
+	var top_damage := 0
+	var top_kills := 0
+	for source in element_stats:
+		var stats: Dictionary = element_stats[source]
+		if int(stats["damage"]) > top_damage:
+			top_damage = int(stats["damage"])
+			top_source = source
+		if int(stats["kills"]) > top_kills: top_kills = int(stats["kills"])
+	var causes := "없음"
+	if not death_causes.is_empty():
+		var cause_parts: Array[String] = []
+		for cause in death_causes: cause_parts.append("%s %d명" % [cause, death_causes[cause]])
+		causes = ", ".join(cause_parts)
+	result_text = "던전 공략 완료\n\n입장한 용사: %d명\n사망한 용사: %d명\n사망 원인: %s\n\n최다 피해 요소: %s (%d)\n마지막 일격 횟수: %d\n\n획득 에너지: %d\n방문한 방: %d회\n함정 발동: %d회" % [entered, killed, causes, top_source, top_damage, top_kills, energy_earned, rooms_visited, trap_hits]
 	_update_buttons()
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -502,6 +613,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			panning = true
 			pan_last = event.position
 		else: panning = false
+		return
+	if event.button_index == MOUSE_BUTTON_LEFT and MINIMAP_RECT.has_point(event.position):
+		if event.pressed: _focus_from_minimap(event.position)
 		return
 	if event.button_index == MOUSE_BUTTON_LEFT and depth1_selected == "VIEW" and CANVAS_RECT.has_point(event.position):
 		if event.pressed:
@@ -531,7 +645,13 @@ func _unhandled_input(event: InputEvent) -> void:
 	else: _handle_mouse_up(event.position)
 
 func _handle_mouse_down(point: Vector2) -> void:
-	if mode == "RUN": return
+	if mode == "RUN":
+		var run_room: DungeonRoom = dungeon.room_at(_screen_to_world(point))
+		if run_room != null:
+			selected_room = run_room.id
+			event_text = "방 #%d %s 상태를 확인 중입니다." % [run_room.id, _room_display_label(run_room)]
+			queue_redraw()
+		return
 	var world_point := _screen_to_world(point)
 	if tool == "EMPTY" or tool == "EMPTY_MODE":
 		var room_position := _snap_point(world_point)
@@ -543,6 +663,7 @@ func _handle_mouse_down(point: Vector2) -> void:
 			event_text = "3×3칸 방을 만들었습니다. 오른쪽 아래 모서리로 크기를 조절하세요."
 			if tool == "EMPTY":
 				tool = ""
+				depth2_selected = ""
 				_update_cursor(point)
 		_update_cursor(point)
 		queue_redraw()
@@ -560,11 +681,13 @@ func _handle_mouse_down(point: Vector2) -> void:
 			clicked_room.content = "None"
 			event_text = "입구방으로 설정했습니다."
 			tool = ""
+			depth2_selected = ""
 		elif tool == "SET_TREASURE":
 			clicked_room.role = "Treasure"
 			clicked_room.content = "Treasure"
 			event_text = "보물방으로 설정했습니다."
 			tool = ""
+			depth2_selected = ""
 		elif tool == "CONTENT":
 			if clicked_room.role == "Entrance":
 				event_text = "입구방에는 내부 요소를 넣을 수 없습니다."
@@ -574,12 +697,15 @@ func _handle_mouse_down(point: Vector2) -> void:
 				clicked_room.content = pending_content
 				event_text = "%s을(를) 배치했습니다." % clicked_room.content_name()
 				tool = ""
+				depth2_selected = ""
 		elif tool == "DELETE_SINGLE" or tool == "DELETE_MODE":
 			var removed_id := clicked_room.id
 			dungeon.remove_room(removed_id)
 			selected_room = -1
 			event_text = "방을 삭제했습니다."
-			if tool == "DELETE_SINGLE": tool = ""
+			if tool == "DELETE_SINGLE":
+				tool = ""
+				depth2_selected = ""
 		_refresh_depth_menus()
 		_update_cursor(point)
 		queue_redraw()
@@ -600,6 +726,7 @@ func _handle_mouse_down(point: Vector2) -> void:
 				event_text = "해당 마진 칸에 통로가 없습니다."
 			if tool == "DISCONNECT":
 				tool = ""
+				depth2_selected = ""
 				_refresh_depth_menus()
 			queue_redraw()
 			return
@@ -642,6 +769,7 @@ func _handle_mouse_down(point: Vector2) -> void:
 		corridor_first = {}
 		if tool == "DOOR":
 			tool = ""
+			depth2_selected = ""
 			_refresh_depth_menus()
 		queue_redraw()
 		return
@@ -800,7 +928,7 @@ func _draw() -> void:
 	for room in dungeon.rooms.values(): _draw_room(room)
 	if not corridor_first.is_empty() and dungeon.rooms.has(corridor_first["id"]):
 		var selected_margin_room: DungeonRoom = dungeon.rooms[corridor_first["id"]]
-		var selected_margin_rect := _margin_cell_rect(selected_margin_room, corridor_first["side"], corridor_first["cell"])
+		var selected_margin_rect: Rect2 = _margin_cell_rect(selected_margin_room, str(corridor_first["side"]), int(corridor_first["cell"]))
 		draw_rect(_world_rect_to_screen(selected_margin_rect), Color("#ffd16688"), true)
 		draw_rect(_world_rect_to_screen(selected_margin_rect), Color("#ffd166"), false, 2.0)
 	if mode == "RUN" and hero != null and result_text == "":
@@ -808,7 +936,113 @@ func _draw() -> void:
 		var hero_pos: Vector2 = _world_to_screen(current_room.position + current_room.size / 2.0)
 		draw_circle(hero_pos, 16, Color("#ffffff"))
 		draw_circle(hero_pos, 10, Color("#ff9f1c"))
+		if hero.state.begins_with("FIGHTING"):
+			var pulse := 22.0 + sin(Time.get_ticks_msec() / 90.0) * 4.0
+			draw_arc(hero_pos, pulse, 0.0, TAU, 24, Color("#ef476f99"), 3.0)
+			draw_string(ui_font, hero_pos + Vector2(-30, -28), "전투 중", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#ff8c8c"))
 	_draw_hud()
+	_draw_minimap()
+	_draw_live_analysis()
+
+func _draw_minimap() -> void:
+	draw_rect(MINIMAP_RECT, Color("#0b1220cc"), true)
+	draw_rect(MINIMAP_RECT, Color("#8da9c4aa"), false, 1.0)
+	draw_string(ui_font, MINIMAP_RECT.position + Vector2(10, 18), "미니맵", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#dbeafe"))
+	if dungeon.rooms.is_empty():
+		draw_string(ui_font, MINIMAP_RECT.position + Vector2(10, 48), "방을 배치하세요", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#8da9c4"))
+		return
+	var bounds := Rect2()
+	var initialized := false
+	for room in dungeon.rooms.values():
+		if not initialized:
+			bounds = room.rect()
+			initialized = true
+		else:
+			bounds = bounds.merge(room.rect())
+	bounds = bounds.grow(DungeonManager.ROOM_MARGIN)
+	var inner := MINIMAP_RECT.grow(-8.0)
+	inner.position.y += 8.0
+	inner.size.y -= 8.0
+	var scale_x: float = inner.size.x / max(bounds.size.x, 1.0)
+	var scale_y: float = inner.size.y / max(bounds.size.y, 1.0)
+	var map_scale: float = min(scale_x, scale_y)
+	var offset := inner.position + (inner.size - bounds.size * map_scale) / 2.0
+	for room in dungeon.rooms.values():
+		for other_id in room.connections:
+			if room.id < other_id and dungeon.rooms.has(other_id):
+				var other: DungeonRoom = dungeon.rooms[other_id]
+				draw_line(_minimap_point(room.position + room.size / 2.0, bounds, offset, map_scale), _minimap_point(other.position + other.size / 2.0, bounds, offset, map_scale), Color("#c9a66b99"), 2.0)
+	for room in dungeon.rooms.values():
+		var room_color := Color("#8da9c4")
+		if room.role == "Entrance": room_color = Color("#4ecdc4")
+		elif room.role == "Treasure": room_color = Color("#ffd166")
+		var mini_rect := Rect2(_minimap_point(room.position, bounds, offset, map_scale), room.size * map_scale)
+		draw_rect(mini_rect, room_color, true)
+		draw_rect(mini_rect, Color("#ffffffcc"), false, 1.0)
+		if mode == "RUN" and hero != null and room.id == hero.current_room:
+			draw_rect(mini_rect.grow(2.0), Color("#ff9f1c"), false, 2.0)
+	if mode == "RUN" and hero != null and dungeon.rooms.has(hero.current_room):
+		var current: DungeonRoom = dungeon.rooms[hero.current_room]
+		draw_circle(_minimap_point(current.position + current.size / 2.0, bounds, offset, map_scale), 3.5, Color("#ffffff"))
+
+func _focus_from_minimap(screen_point: Vector2) -> void:
+	if dungeon.rooms.is_empty(): return
+	var bounds := Rect2()
+	var initialized := false
+	for room in dungeon.rooms.values():
+		if not initialized:
+			bounds = room.rect()
+			initialized = true
+		else:
+			bounds = bounds.merge(room.rect())
+	bounds = bounds.grow(DungeonManager.ROOM_MARGIN)
+	var inner := MINIMAP_RECT.grow(-8.0)
+	inner.position.y += 8.0
+	inner.size.y -= 8.0
+	var map_scale: float = min(inner.size.x / max(bounds.size.x, 1.0), inner.size.y / max(bounds.size.y, 1.0))
+	var offset := inner.position + (inner.size - bounds.size * map_scale) / 2.0
+	var world_point := bounds.position + (screen_point - offset) / map_scale
+	camera_offset = CANVAS_RECT.get_center() - world_point * camera_zoom
+	queue_redraw()
+
+func _minimap_point(world_point: Vector2, bounds: Rect2, offset: Vector2, map_scale: float) -> Vector2:
+	return offset + (world_point - bounds.position) * map_scale
+
+func _draw_live_analysis() -> void:
+	if mode != "RUN": return
+	var panel := Rect2(925, 110, 325, 325)
+	draw_rect(panel, Color("#0b1220dd"), true)
+	draw_rect(panel, Color("#8da9c4aa"), false, 1.0)
+	draw_string(ui_font, panel.position + Vector2(10, 20), "진행 분석", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("#dbeafe"))
+	if hero != null:
+		draw_string(ui_font, panel.position + Vector2(10, 43), "용사 #%d  HP %d/%d" % [entered, max(hero.hp, 0), GameData.HERO_HP], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#ffffff"))
+		draw_string(ui_font, panel.position + Vector2(10, 62), "행동: %s" % _hero_state_name(hero.state), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#8da9c4"))
+	var log_y := 84
+	if selected_room >= 0 and dungeon.rooms.has(selected_room):
+		var inspected: DungeonRoom = dungeon.rooms[selected_room]
+		var inspect_status := "탐험 대기"
+		if hero != null and hero.current_room == inspected.id:
+			inspect_status = "전투 중" if hero.state.begins_with("FIGHTING") else _hero_state_name(hero.state)
+		if inspected.defeated: inspect_status = "전투 완료"
+		draw_string(ui_font, panel.position + Vector2(10, 84), "선택 방 #%d %s · %s" % [inspected.id, inspected.custom_name, inspect_status], HORIZONTAL_ALIGNMENT_LEFT, 305, 11, Color("#ffd166"))
+		if inspected.content_name() != "":
+			draw_string(ui_font, panel.position + Vector2(10, 102), "요소: %s" % inspected.content_name(), HORIZONTAL_ALIGNMENT_LEFT, 305, 11, Color("#dbeafe"))
+			log_y = 122
+			if inspected.combat_hp >= 0:
+				draw_string(ui_font, panel.position + Vector2(155, 102), "적 HP %d" % inspected.combat_hp, HORIZONTAL_ALIGNMENT_LEFT, 140, 11, Color("#ef8894"))
+	draw_string(ui_font, panel.position + Vector2(10, log_y), "최근 이벤트", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#ffd166"))
+	var visible_count: int = min(7, event_log.size())
+	for index in range(visible_count):
+		var entry: Dictionary = event_log[index]
+		var message: String = entry["message"]
+		var room_id: int = entry["room_id"]
+		if room_id >= 0 and dungeon.rooms.has(room_id):
+			var event_room: DungeonRoom = dungeon.rooms[room_id]
+			if event_room.custom_name != "": message = message.replace("방 #%d" % room_id, "방 #%d %s" % [room_id, event_room.custom_name])
+		draw_string(ui_font, panel.position + Vector2(10, log_y + 18 + index * 20), message, HORIZONTAL_ALIGNMENT_LEFT, 305, 10, Color("#dbeafe"))
+	var total_damage := 0
+	for source in element_stats: total_damage += int(element_stats[source]["damage"])
+	draw_string(ui_font, panel.position + Vector2(10, 305), "누적 피해 %d  ·  사망 %d" % [total_damage, killed], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#73e6a5"))
 
 func _draw_grid() -> void:
 	var top_left := _screen_to_world(CANVAS_RECT.position)
@@ -866,7 +1100,7 @@ func _draw_room(room: DungeonRoom) -> void:
 	if room.id == selected_room: draw_rect(rect.grow(5), Color("#ffffff80"), false, 3.0)
 	draw_rect(rect, color, true)
 	draw_rect(rect, Color("#ffffff"), false, 2.0)
-	_draw_centered(room.label(), rect.position + rect.size / 2.0 + Vector2(0, 6), 16, Color("#101827"))
+	_draw_centered(_room_display_label(room), rect.position + rect.size / 2.0 + Vector2(0, 6), 16, Color("#101827"))
 	if mode == "EDIT" and room.id == selected_room: draw_rect(Rect2(rect.end - Vector2(RESIZE_HANDLE, RESIZE_HANDLE), Vector2(RESIZE_HANDLE, RESIZE_HANDLE)), Color("#ffffff"), true)
 
 func _world_rect_to_screen(rect: Rect2) -> Rect2:
@@ -874,7 +1108,7 @@ func _world_rect_to_screen(rect: Rect2) -> Rect2:
 
 func _draw_hud() -> void:
 	var mode_text := "편집" if mode == "EDIT" else "영업"
-	var hud := "상태: %s    에너지: %d    입장: %d명    사망: %d명" % [mode_text, energy, entered, killed]
+	var hud := "상태: %s    에너지: %d    입장: %d명    사망: %d명    용사 스택: %d" % [mode_text, energy, entered, killed, hero_stack_total]
 	if mode == "RUN" and hero != null: hud += "    용사 체력: %d / %d    행동: %s" % [max(hero.hp, 0), GameData.HERO_HP, _hero_state_name(hero.state)]
 	draw_string(ui_font, Vector2(205, 95), hud, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("#dbeafe"))
 	draw_string(ui_font, Vector2(205, 650), event_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("#ffd166"))
@@ -885,17 +1119,22 @@ func _draw_hud() -> void:
 		if room.role == "Treasure": treasure_count += 1
 	var entrance_color := Color("#73e6a5") if entrance_count == 1 else Color("#ef8894")
 	var treasure_color := Color("#73e6a5") if treasure_count == 1 else Color("#ef8894")
-	draw_string(ui_font, Vector2(18, 505), "보물방 %d/1" % treasure_count, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, treasure_color)
-	draw_string(ui_font, Vector2(18, 528), "입구방 %d/1" % entrance_count, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, entrance_color)
+	draw_string(ui_font, Vector2(18, 475), "보물방 %d/1" % treasure_count, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, treasure_color)
+	draw_string(ui_font, Vector2(18, 498), "입구방 %d/1" % entrance_count, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, entrance_color)
 	if result_text != "":
-		draw_rect(Rect2(405, 190, 540, 360), Color("#111a2f"), true)
-		draw_rect(Rect2(405, 190, 540, 360), Color("#ffd166"), false, 3.0)
+		draw_rect(Rect2(350, 125, 600, 500), Color("#111a2f"), true)
+		draw_rect(Rect2(350, 125, 600, 500), Color("#ffd166"), false, 3.0)
 		var lines := result_text.split("\n")
-		for i in range(lines.size()): draw_string(ui_font, Vector2(455, 245 + i * 30), lines[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 20 if i == 0 else 16, Color("#ffffff"))
+		for i in range(lines.size()): draw_string(ui_font, Vector2(400, 175 + i * 30), lines[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 20 if i == 0 else 16, Color("#ffffff"))
 
 func _draw_centered(text: String, pos: Vector2, size: int, color: Color) -> void:
 	var width := ui_font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
 	draw_string(ui_font, pos + Vector2(-width / 2, 0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, color)
+
+func _room_display_label(room: DungeonRoom) -> String:
+	var base := room.custom_name if room.custom_name != "" else room.label()
+	if mode == "RUN": return "%s #%d" % [base, room.id]
+	return base
 
 func _hero_state_name(value: String) -> String:
 	match value:

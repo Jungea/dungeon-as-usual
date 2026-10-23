@@ -5,6 +5,7 @@ var id: int
 var role: String
 var position: Vector2
 var size: Vector2
+var custom_name := ""
 var connections: Array[int] = []
 var connections_by_side: Dictionary = {}
 var connection_cells_by_side: Dictionary = {}
@@ -40,4 +41,5 @@ func content_name() -> String:
 func label() -> String:
 	var detail := content_name()
 	if detail == "": detail = display_name()
+	if custom_name != "": detail = custom_name
 	return detail
