@@ -7,13 +7,11 @@ var previous_room := -1
 var visited_rooms: Dictionary = {}
 var known_connections: Dictionary = {}
 var state := "EXPLORING"
-var path_stack: Array[int] = []
 var rng := RandomNumberGenerator.new()
 
 func _init(start_room: int):
 	rng.randomize()
 	current_room = start_room
-	path_stack.append(start_room)
 
 func enter(room_id: int, connections: Array[int]) -> void:
 	previous_room = current_room
@@ -29,15 +27,33 @@ func choose_next() -> int:
 	if not unseen.is_empty():
 		state = "CHOOSING PATH"
 		return unseen[rng.randi_range(0, unseen.size() - 1)]
-	if path_stack.size() > 1:
+	var frontier_step := _next_step_to_frontier()
+	if frontier_step >= 0:
 		state = "BACKTRACKING"
-		path_stack.pop_back()
-		return path_stack.back()
-	state = "CHOOSING PATH"
+		return frontier_step
 	return -1
+
+func _next_step_to_frontier() -> int:
+	var queue: Array[int] = [current_room]
+	var parent: Dictionary = {current_room: -1}
+	var frontier_room := -1
+	while not queue.is_empty():
+		var room_id: int = queue.pop_front()
+		for next_id in known_connections.get(room_id, []):
+			if not visited_rooms.has(next_id):
+				frontier_room = room_id
+				break
+			if visited_rooms.has(next_id) and not parent.has(next_id):
+				parent[next_id] = room_id
+				queue.append(next_id)
+		if frontier_room >= 0: break
+	if frontier_room < 0: return -1
+	var step := frontier_room
+	while parent.get(step, -1) != current_room and parent.get(step, -1) >= 0:
+		step = parent[step]
+	return step
 
 func move_to(room_id: int) -> void:
 	previous_room = current_room
 	current_room = room_id
-	if room_id != previous_room: path_stack.append(room_id)
 	state = "MOVING"

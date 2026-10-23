@@ -20,7 +20,7 @@ Sprint 1에서는 완성된 게임이나 Steam 연동 기능을 만들지 않는
 
 - 플레이어는 던전의 주인이다.
 - 인간 모험가는 던전의 보물을 노리고 침입한다.
-- 플레이어는 함정, 몬스터, 갈림길, 막다른 길을 배치해 용사를 방해한다.
+- 플레이어는 방 안에 보물, 함정, 몬스터를 배치해 용사를 방해한다.
 - 용사는 던전 구조를 미리 알지 못하며 직접 탐험한다.
 - 용사가 죽으면 플레이어는 Energy를 얻고 새로운 용사가 입장한다.
 - 어느 용사가 마지막 Treasure에 도달하면 현재 Dungeon Run이 종료된다.
@@ -30,7 +30,7 @@ Sprint 1에서는 완성된 게임이나 Steam 연동 기능을 만들지 않는
 
 ```text
 던전 설계
-→ OPEN DUNGEON
+→ 던전 오픈
 → 용사 자동 탐험 관찰
 → 함정 및 몬스터 조우
 → 사망 시 Energy 획득 및 새 용사 입장
@@ -58,7 +58,7 @@ Sprint 1에서는 완성된 게임이나 Steam 연동 기능을 만들지 않는
                     |
                  [EMPTY]
                     |
-                  [BOSS]
+                 [강한 몬스터]
                     |
                [TREASURE]
 ```
@@ -89,20 +89,18 @@ Room
 - connections[]
 ```
 
-### 5.1 Room Type
+### 5.1 Room과 내부 요소
 
-- Entrance
-- Empty
-- Spike
-- Slime
-- Boss
-- Treasure
+- Room은 일반 방, 입구방, 보물방 역할로 구분되는 사각형이다.
+- 입구방과 보물방은 기존 Room에 역할로 설정한다.
+- 일반 Room 내부 요소: 가시, 독물, 불구덩이, 약한 몬스터, 중간 몬스터, 강한 몬스터
+- 강한 몬스터는 별도 Boss 타입이 아니라 높은 에너지 비용과 능력치를 가진 몬스터다.
 
 ### 5.2 유효한 던전 조건
 
-- Entrance는 정확히 1개 존재해야 한다.
-- Treasure는 정확히 1개 존재해야 한다.
-- Entrance에서 Treasure까지 실제로 도달 가능한 경로가 존재해야 한다.
+- 입구방은 정확히 1개 존재해야 한다.
+- 보물방은 정확히 1개 존재해야 한다.
+- 입구방에서 보물방까지 실제로 도달 가능한 경로가 존재해야 한다.
 - 조건을 충족하지 못하면 Dungeon을 Open할 수 없다.
 
 ## 6. EDIT MODE 요구사항
@@ -117,32 +115,34 @@ Room
 
 최소 UI 기능:
 
-- `ADD EMPTY`
-- `ADD SPIKE`
-- `ADD SLIME`
-- `ADD BOSS`
-- `ADD TREASURE`
-- `CONNECT`
-- `DELETE`
-- `OPEN DUNGEON`
+- DEPTH1 메뉴: `방`, `장애물`, `몬스터`, `통로`, `보기`
+- 방 DEPTH2: 기본 단일 그리기, 그리기 모드, 입구방 설정, 보물방 설정, 삭제, 삭제 모드
+- 장애물·몬스터 DEPTH2: 종류를 선택한 뒤 방을 클릭해 배치
+- 통로 DEPTH2: 그리기, 그리기 모드, 삭제, 삭제 모드
+- 하단 상태 표시: `입구방 0/1`, `보물방 0/1`, `던전 오픈`
+- 기본 상태는 `보기`이며, DEPTH2 내용과 실제 기능은 보기 선택으로 초기화한다.
+- 보기에서 빈 맵은 드래그로 이동하고, 통로가 없는 방은 드래그로 이동·크기 조절한다.
+- 통로가 연결된 방은 보기에서 이동·크기 조절할 수 없다.
+- 통로 첫 번째 마진 칸은 아무 방에서 선택하고, 두 번째는 다른 방의 마주 보는 마진 칸을 선택한다.
+- 대각선 마진과 이미 연결된 두 방 사이의 중복 통로는 허용하지 않는다.
 
-Entrance는 게임 시작 시 기본 생성할 수 있다.
+입구방과 보물방은 플레이어가 기존 Room에 역할로 설정한다.
 
-Room을 드래그해 이동할 수 있으면 좋지만 구현 복잡도가 크게 증가한다면 단순 클릭 배치 방식을 사용해도 된다.
+보기 상태에서 통로가 연결되지 않은 Room은 드래그로 이동·크기 조절할 수 있다.
 
-## 7. OPEN DUNGEON
+## 7. 던전 오픈
 
-플레이어가 `OPEN DUNGEON` 버튼을 누르면 다음 조건을 검사한다.
+플레이어가 `던전 오픈`을 누르면 다음 조건을 검사한다.
 
-1. Entrance가 존재하는가?
-2. Treasure가 존재하는가?
-3. Entrance에서 Treasure까지 도달 가능한 경로가 있는가?
+1. 입구방이 정확히 1개 설정되어 있는가?
+2. 보물방이 정확히 1개 설정되어 있는가?
+3. 입구방에서 보물방까지 도달 가능한 경로가 있는가?
 
 모든 조건을 만족하면:
 
 - RUN MODE로 전환한다.
 - Dungeon 편집 기능을 비활성화한다.
-- Entrance에서 Hero를 생성한다.
+- 입구방에서 Hero를 생성한다.
 
 ## 8. Hero
 
@@ -189,7 +189,7 @@ Hero가 현재 무엇을 하는지 화면에 표시한다.
 - `BACKTRACKING`
 - `ENTERING SPIKE`
 - `FIGHTING SLIME`
-- `FIGHTING BOSS`
+- `FIGHTING STRONG MONSTER`
 - `FOUND TREASURE`
 - `DEAD`
 
@@ -225,18 +225,19 @@ Hero attacks Slime
 
 Slime이 죽으면 현재 Dungeon Run이 끝날 때까지 죽은 상태를 유지한다.
 
-### 11.4 Boss
+### 11.4 중간·강한 몬스터
 
 | 속성 | 값 |
 |---|---:|
-| HP | 20 |
-| Attack | 4 |
+| 구분 | HP | Attack |
+| 중간 몬스터 | 14 | 3 |
+| 강한 몬스터 | 20 | 4 |
 
-Slime과 동일한 방식으로 자동 턴 전투를 진행한다. Boss가 죽으면 현재 Dungeon Run이 끝날 때까지 죽은 상태를 유지한다.
+약한 몬스터와 동일한 방식으로 자동 턴 전투를 진행한다. 강한 몬스터는 높은 에너지 비용으로 배치하는 보스 대용 몬스터이며, 별도 Boss 타입으로 취급하지 않는다.
 
 ### 11.5 Treasure
 
-- Hero가 Treasure Room에 도달하면 Treasure를 획득한다.
+- Hero가 보물 요소가 있는 Room에 도달하면 Treasure를 획득한다.
 - Treasure 획득 즉시 현재 Dungeon Run을 종료한다.
 
 ## 12. Hero 사망 및 재입장
@@ -249,7 +250,7 @@ Hero HP가 0 이하가 되면 사망한다.
 - Heroes Killed가 1 증가한다.
 - 약 1초 후 새 Hero가 Entrance에서 생성된다.
 - 새 Hero는 이전 Hero의 탐험 정보를 공유하지 않는다.
-- 이미 죽은 Slime과 Boss의 상태는 현재 Dungeon Run 동안 유지된다.
+- 이미 죽은 몬스터의 상태는 현재 Dungeon Run 동안 유지된다.
 
 RUN MODE에서는 Hero가 죽어도 Dungeon Run이 종료되지 않는다. 새 Hero가 계속 도전하며, 어느 Hero가 Treasure를 획득해야 Run이 종료된다.
 
@@ -350,8 +351,10 @@ Trap Hits: 18
 | Spike | Damage | 5 |
 | Slime | HP | 8 |
 | Slime | Attack | 2 |
-| Boss | HP | 20 |
-| Boss | Attack | 4 |
+| 중간 몬스터 | HP | 14 |
+| 중간 몬스터 | Attack | 3 |
+| 강한 몬스터 | HP | 20 |
+| 강한 몬스터 | Attack | 4 |
 | Hero Death | Energy Reward | 10 |
 
 ## 19. Sprint 1 제외 범위
@@ -404,7 +407,7 @@ Trap Hits: 18
 9. Backtracking
 10. Spike
 11. Slime 전투
-12. Boss 전투
+12. 중간·강한 몬스터 전투
 13. Hero 사망 및 재생성
 14. Treasure
 15. Run 종료
@@ -437,10 +440,10 @@ Trap Hits: 18
 - [ ] Room끼리 Connection을 만들 수 있다.
 - [ ] Spike를 배치할 수 있다.
 - [ ] Slime을 배치할 수 있다.
-- [ ] Boss를 배치할 수 있다.
+- [ ] 약한·중간·강한 몬스터를 배치할 수 있다.
 - [ ] Treasure를 배치할 수 있다.
 - [ ] Entrance에서 Treasure까지 유효한 경로를 만들 수 있다.
-- [ ] `OPEN DUNGEON`을 누를 수 있다.
+- [ ] `던전 오픈`을 누를 수 있다.
 - [ ] 유효성 검사 후 EDIT MODE에서 RUN MODE로 전환된다.
 - [ ] Hero가 Entrance에서 생성된다.
 - [ ] Hero가 전체 Dungeon 구조를 모르는 상태에서 탐험한다.
@@ -448,7 +451,7 @@ Trap Hits: 18
 - [ ] 필요한 경우 Backtracking한다.
 - [ ] Spike에 입장하면 피해를 입는다.
 - [ ] Slime을 만나면 자동 전투한다.
-- [ ] Boss를 만나면 자동 전투한다.
+- [ ] 몬스터를 만나면 자동 전투한다.
 - [ ] Hero 사망 시 Energy가 10 증가한다.
 - [ ] Hero 사망 후 새로운 Hero가 Entrance에서 생성된다.
 - [ ] 새 Hero는 이전 Hero의 탐험 정보를 모른다.
